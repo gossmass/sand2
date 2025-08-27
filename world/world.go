@@ -9,23 +9,74 @@ import (
 
 const CHUNK_SIZE int = 64
 
+// TODO: Fix resolution
+const SCREEN_W = 1280
+const SCREEN_H = 720
+
 type Position struct {
 	X int
 	Y int
 }
 
+func NewPosition(x, y int) Position {
+	return Position{
+		X: x, 
+		Y: y,
+	}
+}
+
 type World struct {
+	screenBuff rl.RenderTexture2D
+	background rl.Texture2D
 	chunks map[Position]*Chunk
 	Camera rl.Camera2D
 
 	observer.Observerable
 }
 
+func floor(a, b int) int {
+	if b == 0 {
+		panic("Division by 0")
+	}
+	
+	if a >= 0 {
+		return a / b
+	}
+	
+	return ((a + 1) / b) - 1
+}
+
+func mod(a, b int) int {
+	m := a % b
+	
+	if m < 0 {
+		m += b
+	}
+	
+	return m
+}
+
 func New() *World {
-	return &World{
+	w := &World{
 		chunks: make(map[Position]*Chunk),
 		Camera: rl.NewCamera2D(rl.NewVector2(100, 100), rl.NewVector2(0, 0), 0, 1),
 	}
+	
+	// Screen buffer to draw stuff
+	w.screenBuff = rl.LoadRenderTexture(int32(SCREEN_W), int32(SCREEN_W))
+	
+	// Background stuff
+	bgImg := rl.GenImageChecked(32, 32, 16, 16, rl.Blank, rl.DarkGray)
+	w.background = rl.LoadTextureFromImage(bgImg)
+	rl.UnloadImage(bgImg)
+	rl.SetTextureWrap(w.background, rl.WrapRepeat)
+	
+	return w
+}
+
+func (w *World) Clean() {
+	rl.UnloadTexture(w.background)
+	rl.UnloadRenderTexture(w.screenBuff)
 }
 
 func (w *World) MouseToWorldSpace() rl.Vector2 {
@@ -35,21 +86,7 @@ func (w *World) MouseToWorldSpace() rl.Vector2 {
 
 // Set particles at global position
 func (w *World) Set(globalX, globalY int, mat Material) {
-	oX := globalX
-	oY := globalY
-
-	if globalX < 0 {
-		globalX -= CHUNK_SIZE
-	}
-
-	if globalY < 0 {
-		globalY -= CHUNK_SIZE
-	}
-
-	pos := Position{
-		X: globalX / CHUNK_SIZE,
-		Y: globalY / CHUNK_SIZE,
-	}
+	pos := NewPosition(floor(globalX, CHUNK_SIZE), floor(globalY, CHUNK_SIZE))
 
 	chunk, ok := w.chunks[pos]
 
@@ -58,9 +95,8 @@ func (w *World) Set(globalX, globalY int, mat Material) {
 		w.chunks[pos] = chunk
 	}
 
-	// p := chunk.ToLocalSpace(globalX, globalY)
-	localX := oX - (pos.X * CHUNK_SIZE)
-	localY := oY - (pos.Y * CHUNK_SIZE)
+	localX := mod(globalX, CHUNK_SIZE)
+	localY := mod(globalY, CHUNK_SIZE)
 
 	chunk.Set(localX, localY, mat.color)
 }
@@ -91,34 +127,43 @@ func (w *World) Update() {
 	}
 }
 
-func (w *World) Render() {
-	// Cameraman
-
-	for pos, _ := range w.chunks {
-		x := int32(pos.X * CHUNK_SIZE)
-		y := int32(pos.Y * CHUNK_SIZE)
-		text := fmt.Sprintf("%v", pos)
-
-		rl.DrawRectangleLines(x, y, int32(CHUNK_SIZE), int32(CHUNK_SIZE), rl.Green)
-		rl.DrawText(text, x, y, 10, rl.RayWhite)
+func (w *World) getVisibleChunks() []*Chunk {
+	result := make([]*Chunk, 0, 1)
+	
+	topLeft := rl.GetScreenToWorld2D(rl.Vector2Zero(), w.Camera)
+	bottomRight := rl.GetScreenToWorld2D(rl.NewVector2(float32(SCREEN_W + CHUNK_SIZE), float32(SCREEN_H)), w.Camera)
+	
+	chunkMinX := floor(int(topLeft.X), CHUNK_SIZE)
+	chunkMinY := floor(int(topLeft.Y), CHUNK_SIZE)
+	chunkMaxX := floor(int(bottomRight.X), CHUNK_SIZE)
+	chunkMaxY := floor(int(bottomRight.Y), CHUNK_SIZE)
+	
+	for y := chunkMaxY; y >= chunkMinY; y-- {
+		for x := chunkMinX; x < chunkMaxX; x++ {
+			if chunk, ok := w.chunks[NewPosition(x, y)]; ok {
+				result = append(result, chunk)
+			}
+		}
 	}
+	
+	return result
+}
 
-	// mpos := w.MouseToWorldSpace()
-	//
-	// hx := int(mpos.X)
-	// hy := int(mpos.Y)
-	// ox := hx
-	//
-	// if hx < 0 {
-	// 	hx -= CHUNK_SIZE
-	// }
-	//
-	// if hy < 0 {
-	// 	hy -= CHUNK_SIZE
-	// }
-
-	// lx := ox - ((hx / CHUNK_SIZE) * CHUNK_SIZE)
-	// ly := 0
-	//
-	// rl.DrawText(fmt.Sprintf("%v, %v\nDIV: %v, %v\nPERC: %v, %v", hx, hy, hx/CHUNK_SIZE, hy/CHUNK_SIZE, lx, ly), 10, 10, 24, rl.Yellow)
+func (w *World) Render() {
+	rl.BeginMode2D(w.Camera)
+	rl.DrawTextureRec(w.background, rl.NewRectangle(0, 0, float32(SCREEN_W), float32(SCREEN_H)), rl.Vector2Zero(), rl.RayWhite)
+	
+	chunks := w.getVisibleChunks()
+	
+	// UpdateTextureRec(texture Texture2D, rec Rectangle, pixels []color.RGBA)
+	
+	for _, chunk := range chunks {
+		chunk.Render(&w.screenBuff.Texture)
+	}
+	
+	rl.DrawTexture(w.screenBuff.Texture, 0, 0, rl.White)
+	
+	rl.EndMode2D()
+	
+	rl.DrawText(fmt.Sprintf("Chunks to draw: %d", len(chunks)), 5, 20, 20, rl.Blue)
 }

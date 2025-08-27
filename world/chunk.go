@@ -62,7 +62,12 @@ func (c *Chunk) Swap() {
 }
 
 func (c *Chunk) Render(output *rl.Texture2D) {
-	rl.UpdateTexture(*output, c.buff)
+	x := c.position.X*CHUNK_SIZE
+	y := c.position.Y*CHUNK_SIZE
+	
+	rec := rl.NewRectangle(float32(x), float32(y), float32(CHUNK_SIZE), float32(CHUNK_SIZE))
+	rl.DrawRectangleLines(int32(x), int32(y), int32(CHUNK_SIZE), int32(CHUNK_SIZE), rl.Green)
+	rl.UpdateTextureRec(*output, rec, c.buff)
 }
 
 func (c *Chunk) Update(updateStep func(x, y int)) {
@@ -85,4 +90,8 @@ func (c *Chunk) ToLocalSpace(globalX, globalY int) Position {
 		X: x,
 		Y: y,
 	}
+}
+
+func (c *Chunk) GetPosition() Position {
+	return c.position
 }
